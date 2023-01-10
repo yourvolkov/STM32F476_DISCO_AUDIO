@@ -24,6 +24,7 @@
 #include "task.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "Interrupt_handlers.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -57,7 +58,9 @@
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
-extern I2C_HandleTypeDef hi2c3;
+extern SAI_HandleTypeDef hsai_BlockA2;
+extern DMA_HandleTypeDef hdma_sdmmc1;
+extern SD_HandleTypeDef hsd1;
 extern TIM_HandleTypeDef htim1;
 /* USER CODE BEGIN EV */
 
@@ -198,17 +201,45 @@ void TIM1_UP_TIM10_IRQHandler(void)
 }
 
 /**
-  * @brief This function handles I2C3 event interrupt.
+  * @brief This function handles SDMMC1 global interrupt.
   */
-void I2C3_EV_IRQHandler(void)
+void SDMMC1_IRQHandler(void)
 {
-  /* USER CODE BEGIN I2C3_EV_IRQn 0 */
+  /* USER CODE BEGIN SDMMC1_IRQn 0 */
 
-  /* USER CODE END I2C3_EV_IRQn 0 */
-  HAL_I2C_EV_IRQHandler(&hi2c3);
-  /* USER CODE BEGIN I2C3_EV_IRQn 1 */
+  /* USER CODE END SDMMC1_IRQn 0 */
+  HAL_SD_IRQHandler(&hsd1);
+  /* USER CODE BEGIN SDMMC1_IRQn 1 */
 
-  /* USER CODE END I2C3_EV_IRQn 1 */
+  /* USER CODE END SDMMC1_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DMA2 stream3 global interrupt.
+  */
+void DMA2_Stream3_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA2_Stream3_IRQn 0 */
+
+  /* USER CODE END DMA2_Stream3_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_sdmmc1);
+  /* USER CODE BEGIN DMA2_Stream3_IRQn 1 */
+
+  /* USER CODE END DMA2_Stream3_IRQn 1 */
+}
+
+/**
+  * @brief This function handles SAI2 global interrupt.
+  */
+void SAI2_IRQHandler(void)
+{
+  /* USER CODE BEGIN SAI2_IRQn 0 */
+
+  /* USER CODE END SAI2_IRQn 0 */
+  HAL_SAI_IRQHandler(&hsai_BlockA2);
+  /* USER CODE BEGIN SAI2_IRQn 1 */
+
+  /* USER CODE END SAI2_IRQn 1 */
 }
 
 /* USER CODE BEGIN 1 */

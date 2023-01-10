@@ -23,7 +23,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "WM8994_driver.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -47,9 +47,9 @@ I2C_HandleTypeDef hi2c3;
 RTC_HandleTypeDef hrtc;
 
 SAI_HandleTypeDef hsai_BlockA2;
-SAI_HandleTypeDef hsai_BlockB2;
 
 SD_HandleTypeDef hsd1;
+DMA_HandleTypeDef hdma_sdmmc1;
 
 TIM_HandleTypeDef htim1;
 
@@ -67,21 +67,39 @@ const osThreadAttr_t LedBlink_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
+/* Definitions for FS_Task */
+osThreadId_t FS_TaskHandle;
+const osThreadAttr_t FS_Task_attributes = {
+  .name = "FS_Task",
+  .stack_size = 1024 * 4,
+  .priority = (osPriority_t) osPriorityLow,
+};
+/* Definitions for FS_capture */
+osMutexId_t FS_captureHandle;
+const osMutexAttr_t FS_capture_attributes = {
+  .name = "FS_capture"
+};
+/* Definitions for DirReadSemaphore */
+osSemaphoreId_t DirReadSemaphoreHandle;
+const osSemaphoreAttr_t DirReadSemaphore_attributes = {
+  .name = "DirReadSemaphore"
+};
 /* USER CODE BEGIN PV */
-
+FATFS FatFs; 	//Fatfs handle
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-void PeriphCommonClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_SDMMC1_SD_Init(void);
 static void MX_RTC_Init(void);
 static void MX_SAI2_Init(void);
-static void MX_TIM1_Init(void);
+static void MX_DMA_Init(void);
 static void MX_I2C3_Init(void);
+static void MX_TIM1_Init(void);
 void StartDefaultTask(void *argument);
-void StartTask02(void *argument);
+void StartLedBlink(void *argument);
+void StartFS_Task(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -114,9 +132,6 @@ int main(void)
   /* Configure the system clock */
   SystemClock_Config();
 
-/* Configure the peripherals common clocks */
-  PeriphCommonClock_Config();
-
   /* USER CODE BEGIN SysInit */
 
   /* USER CODE END SysInit */
@@ -127,44 +142,27 @@ int main(void)
   MX_FATFS_Init();
   MX_RTC_Init();
   MX_SAI2_Init();
-  MX_TIM1_Init();
+  MX_DMA_Init();
   MX_I2C3_Init();
+  MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
-
-  FATFS FatFs; 	//Fatfs handle
-  FIL fil; 		//File handle
-  FIL fil_2;
-  fil_2 = fil;
-  FILINFO fno; // Fileinfo
-  FRESULT fres; //Result after operations
-  BYTE work[1024]; /* Work area (larger is better for processing time) */
-  DIR directory;
-
-  fres = f_mount(&FatFs, "", 1); //1=mount now
-  for(uint8_t i = 0 ; i < 50; i++){
-	  HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, 1 ^ HAL_GPIO_ReadPin(LED_GREEN_GPIO_Port, LED_GREEN_Pin));
-  }
-  if (fres != FR_OK) {
-//	  fres = f_mkfs("", NULL, 0, work, sizeof(work));
-	  if(fres){
-		  uint8_t hui = 5;
-	  }
-  }else{
-	  fres = f_opendir (&directory, "MUSIC");
-	  for(uint8_t i = 0 ; i < 50; i++){
-
-		  fres = f_readdir(&directory, &fno);
-		  uint8_t hui = 5;
-	  }
-  }
+//  HAL_TIM_Base_Start_IT(&htim1);
+  WM8994_init();
   /* USER CODE END 2 */
 
   /* Init scheduler */
   osKernelInitialize();
+  /* Create the mutex(es) */
+  /* creation of FS_capture */
+  FS_captureHandle = osMutexNew(&FS_capture_attributes);
 
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
+
+  /* Create the semaphores(s) */
+  /* creation of DirReadSemaphore */
+  DirReadSemaphoreHandle = osSemaphoreNew(1, 1, &DirReadSemaphore_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -183,7 +181,10 @@ int main(void)
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
   /* creation of LedBlink */
-  LedBlinkHandle = osThreadNew(StartTask02, NULL, &LedBlink_attributes);
+  LedBlinkHandle = osThreadNew(StartLedBlink, NULL, &LedBlink_attributes);
+
+  /* creation of FS_Task */
+  FS_TaskHandle = osThreadNew(StartFS_Task, NULL, &FS_Task_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -254,30 +255,6 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-}
-
-/**
-  * @brief Peripherals Common Clock Configuration
-  * @retval None
-  */
-void PeriphCommonClock_Config(void)
-{
-  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
-
-  /** Initializes the peripherals clock
-  */
-  PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_SAI2|RCC_PERIPHCLK_CLK48;
-  PeriphClkInitStruct.PLLSAI.PLLSAIN = 192;
-  PeriphClkInitStruct.PLLSAI.PLLSAIR = 2;
-  PeriphClkInitStruct.PLLSAI.PLLSAIQ = 2;
-  PeriphClkInitStruct.PLLSAI.PLLSAIP = RCC_PLLSAIP_DIV2;
-  PeriphClkInitStruct.PLLSAIDivQ = 1;
-  PeriphClkInitStruct.PLLSAIDivR = RCC_PLLSAIDIVR_2;
-  PeriphClkInitStruct.Sai2ClockSelection = RCC_SAI2CLKSOURCE_PLLSAI;
-  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
   {
     Error_Handler();
   }
@@ -391,7 +368,7 @@ static void MX_SAI2_Init(void)
   hsai_BlockA2.Init.OutputDrive = SAI_OUTPUTDRIVE_DISABLE;
   hsai_BlockA2.Init.NoDivider = SAI_MASTERDIVIDER_ENABLE;
   hsai_BlockA2.Init.FIFOThreshold = SAI_FIFOTHRESHOLD_EMPTY;
-  hsai_BlockA2.Init.AudioFrequency = SAI_AUDIO_FREQUENCY_192K;
+  hsai_BlockA2.Init.AudioFrequency = SAI_AUDIO_FREQUENCY_44K;
   hsai_BlockA2.Init.SynchroExt = SAI_SYNCEXT_DISABLE;
   hsai_BlockA2.Init.MonoStereoMode = SAI_STEREOMODE;
   hsai_BlockA2.Init.CompandingMode = SAI_NOCOMPANDING;
@@ -406,32 +383,6 @@ static void MX_SAI2_Init(void)
   hsai_BlockA2.SlotInit.SlotNumber = 1;
   hsai_BlockA2.SlotInit.SlotActive = 0x00000000;
   if (HAL_SAI_Init(&hsai_BlockA2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  hsai_BlockB2.Instance = SAI2_Block_B;
-  hsai_BlockB2.Init.Protocol = SAI_FREE_PROTOCOL;
-  hsai_BlockB2.Init.AudioMode = SAI_MODESLAVE_RX;
-  hsai_BlockB2.Init.DataSize = SAI_DATASIZE_8;
-  hsai_BlockB2.Init.FirstBit = SAI_FIRSTBIT_MSB;
-  hsai_BlockB2.Init.ClockStrobing = SAI_CLOCKSTROBING_FALLINGEDGE;
-  hsai_BlockB2.Init.Synchro = SAI_SYNCHRONOUS;
-  hsai_BlockB2.Init.OutputDrive = SAI_OUTPUTDRIVE_DISABLE;
-  hsai_BlockB2.Init.FIFOThreshold = SAI_FIFOTHRESHOLD_EMPTY;
-  hsai_BlockB2.Init.SynchroExt = SAI_SYNCEXT_DISABLE;
-  hsai_BlockB2.Init.MonoStereoMode = SAI_STEREOMODE;
-  hsai_BlockB2.Init.CompandingMode = SAI_NOCOMPANDING;
-  hsai_BlockB2.Init.TriState = SAI_OUTPUT_NOTRELEASED;
-  hsai_BlockB2.FrameInit.FrameLength = 8;
-  hsai_BlockB2.FrameInit.ActiveFrameLength = 1;
-  hsai_BlockB2.FrameInit.FSDefinition = SAI_FS_STARTFRAME;
-  hsai_BlockB2.FrameInit.FSPolarity = SAI_FS_ACTIVE_LOW;
-  hsai_BlockB2.FrameInit.FSOffset = SAI_FS_FIRSTBIT;
-  hsai_BlockB2.SlotInit.FirstBitOffset = 0;
-  hsai_BlockB2.SlotInit.SlotSize = SAI_SLOTSIZE_DATASIZE;
-  hsai_BlockB2.SlotInit.SlotNumber = 1;
-  hsai_BlockB2.SlotInit.SlotActive = 0x00000000;
-  if (HAL_SAI_Init(&hsai_BlockB2) != HAL_OK)
   {
     Error_Handler();
   }
@@ -539,6 +490,22 @@ static void MX_TIM1_Init(void)
 }
 
 /**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA2_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA2_Stream3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream3_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream3_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -595,22 +562,67 @@ void StartDefaultTask(void *argument)
   /* USER CODE END 5 */
 }
 
-/* USER CODE BEGIN Header_StartTask02 */
+/* USER CODE BEGIN Header_StartLedBlink */
 /**
 * @brief Function implementing the LedBlink thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_StartTask02 */
-void StartTask02(void *argument)
+/* USER CODE END Header_StartLedBlink */
+void StartLedBlink(void *argument)
 {
-  /* USER CODE BEGIN StartTask02 */
+  /* USER CODE BEGIN StartLedBlink */
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    osDelay(1000);
+    HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, 1 ^ HAL_GPIO_ReadPin(LED_GREEN_GPIO_Port, LED_GREEN_Pin));
+    osSemaphoreRelease(DirReadSemaphoreHandle);
   }
-  /* USER CODE END StartTask02 */
+  /* USER CODE END StartLedBlink */
+}
+
+/* USER CODE BEGIN Header_StartFS_Task */
+/**
+* @brief Function implementing the FS_Task thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartFS_Task */
+void StartFS_Task(void *argument)
+{
+  /* USER CODE BEGIN StartFS_Task */
+	FIL fil; 		//File handle
+	FIL fil_2;
+	fil_2 = fil;
+	FILINFO fno; // Fileinfo
+	FRESULT fres; //Result after operations
+	BYTE work[1024]; /* Work area (larger is better for processing time) */
+	DIR directory;
+
+	osMutexAcquire(FS_captureHandle, 0u);
+	fres = f_mount(&FatFs, "", 1); //1=mount now
+	if (fres != FR_OK) {
+		/* Capture error */
+	}
+	osMutexRelease(FS_captureHandle);
+
+  /* Infinite loop */
+
+  for(;;)
+  {
+	  if(osSemaphoreAcquire(DirReadSemaphoreHandle, 0u) == osOK){
+		  osMutexAcquire(FS_captureHandle, 0u);
+		  fres = f_opendir (&directory, "MUSIC");
+		  osMutexRelease(FS_captureHandle);
+	  }
+
+	  osMutexAcquire(FS_captureHandle, 0u);
+	  fres = f_readdir(&directory, &fno);
+	  osMutexRelease(FS_captureHandle);
+	  osDelay(100);
+  }
+  /* USER CODE END StartFS_Task */
 }
 
 /**
